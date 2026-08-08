@@ -1,14 +1,15 @@
-# Agendamento — Segurança e Controle de Acesso
+# Agendamento — Segurança, Regras de Negócio e Eventos
 
 Tech Challenge Fase 3 (POS TECH — Arquitetura e Desenvolvimento Java).
-Este repositório contém a **Parte 1** do projeto: a base de segurança do
-Serviço de Agendamento de um sistema hospitalar (autenticação, perfis de
-usuário e regras de autorização por endpoint).
+Este repositório contém o **Serviço de Agendamento** de um sistema hospitalar:
+autenticação, perfis de usuário, regras de autorização por endpoint (Bloco 1),
+CRUD de consultas com validação de conflito de horário, e publicação de
+eventos `consulta.criada` / `consulta.editada` no RabbitMQ (Bloco 2).
 
-> De acordo com a arquitetura da Fase 3, a segurança vive **dentro** do
-> Serviço de Agendamento (não é um microsserviço à parte). Este projeto é o
-> ponto de partida sobre o qual as próximas partes do time constroem:
-> publicação de eventos (RabbitMQ/Kafka), serviço de notificações e o
+> De acordo com a arquitetura da Fase 3, a segurança e as regras de negócio
+> vivem **dentro** do Serviço de Agendamento (não é um microsserviço à
+> parte). Este projeto é o ponto de partida sobre o qual as próximas partes
+> do time constroem: o Serviço de Notificações (consumidor dos eventos) e o
 > módulo de histórico em GraphQL.
 
 ## Arquitetura
@@ -26,7 +27,18 @@ usuário e regras de autorização por endpoint).
 │  ConsultaController ──▶ ConsultaService       │
 │                          └─▶ ConsultaRepository│
 │                          └─▶ UsuarioRepository │
-└──────────────────────────────────────────────┘
+│                          └─▶ ApplicationEventPublisher
+│                                  │ (AFTER_COMMIT)
+│                                  ▼
+│                          ConsultaEventPublisher
+│                                  │
+└──────────────────────────────────┼─────────────┘
+                                    ▼
+                    RabbitMQ — exchange agendamento.consultas
+                    routing keys: consulta.criada / consulta.editada
+                                    │
+                                    ▼
+                    Serviço de Notificações (consumidor, outro repo/bloco)
 ```
 
 - **Autenticação**: HTTP Basic, senhas com hash BCrypt.
@@ -62,6 +74,65 @@ válidas mas sem permissão para o recurso, **403**. Quando um paciente tenta
 acessar `/consultas/{id}` de outro paciente, também recebe **403** (regra
 validada em tempo de execução, não apenas por rota).
 
+## Regra de conflito de horário
+
+Um mesmo `profissional` não pode ter duas consultas com status `AGENDADA` no
+mesmo `dataHora` (não há campo de duração — "mesmo instante" é a
+interpretação literal de "conflito de horário"). A violação é reportada como
+`BusinessException` → **400 Bad Request**, reaproveitando o mesmo tipo de
+erro já usado para paciente/profissional inexistente — evita introduzir um
+segundo status (409) para a mesma categoria de problema. Consultas
+`REALIZADA`/`CANCELADA` nunca colidem, então editar o status para um desses
+valores nunca é bloqueado por conflito.
+
+O `dataHora` recebido é truncado para o minuto (segundos/frações são
+descartados) antes de validar e persistir — agendamento hospitalar não
+precisa de precisão de segundo, e isso evita falso-negativo na checagem de
+conflito por divergência de precisão de timestamp entre a JVM e o banco.
+
+Validado tanto em `POST /consultas` (novo agendamento) quanto em
+`PUT /consultas/{id}` (o profissional não muda na edição, só `dataHora` e
+`status`).
+
+## Eventos publicados (RabbitMQ)
+
+Sempre que uma consulta é criada ou editada com sucesso, o `ConsultaService`
+publica um evento interno que o `ConsultaEventPublisher` envia ao RabbitMQ
+**após o commit** da transação (evita notificar uma consulta cujo `save`
+sofreu rollback). Esse é o contrato que o Serviço de Notificações consome.
+
+| | |
+|---|---|
+| Exchange | `agendamento.consultas` (topic, durável) |
+| Routing key — nova consulta | `consulta.criada` |
+| Routing key — consulta editada | `consulta.editada` |
+| Fila/binding | responsabilidade do serviço consumidor |
+
+Exemplo de payload (`application/json`):
+
+```json
+{
+  "eventoId": "b3f1c2e4-1234-4a56-9abc-1234567890ab",
+  "tipoEvento": "CONSULTA_CRIADA",
+  "ocorreEm": "2026-08-08T12:00:00Z",
+  "consultaId": 1,
+  "dataHora": "2026-09-01T14:30:00",
+  "status": "AGENDADA",
+  "pacienteId": 3,
+  "pacienteNome": "Carla Pereira",
+  "pacienteEmail": "paciente1@hospital.com",
+  "profissionalId": 1,
+  "profissionalNome": "Dra. Ana Souza",
+  "observacoes": "Consulta de rotina"
+}
+```
+
+**Limitação conhecida**: a publicação é *best-effort* — se o broker estiver
+indisponível no momento do envio, a falha é apenas logada (a consulta já foi
+persistida com sucesso e a resposta HTTP não deve virar erro por causa da
+mensageria). Uma fila de outbox transacional resolveria isso, mas está fora
+do escopo deste bloco.
+
 ## Endpoints da API
 
 ### `POST /consultas` — registrar consulta (ENFERMEIRO)
@@ -90,6 +161,10 @@ Resposta `201 Created`:
 }
 ```
 
+`400 Bad Request` se `pacienteId`/`profissionalId` não existirem, não
+tiverem o perfil esperado, ou se o profissional já tiver uma consulta
+`AGENDADA` no mesmo `dataHora` (ver "Regra de conflito de horário" acima).
+
 ### `PUT /consultas/{id}` — editar consulta (MEDICO)
 
 ```json
@@ -100,7 +175,9 @@ Resposta `201 Created`:
 }
 ```
 
-Resposta `200 OK` com o mesmo formato de `ConsultaResponse` acima.
+Resposta `200 OK` com o mesmo formato de `ConsultaResponse` acima. `400 Bad
+Request` se o novo `dataHora` colidir com outra consulta `AGENDADA` do mesmo
+profissional.
 
 ### `GET /consultas` — histórico completo (MEDICO, ENFERMEIRO)
 
@@ -164,14 +241,26 @@ de desenvolvimento e podem ser sobrescritos por variáveis de ambiente
 | `SEED_ENFERMEIRO_EMAIL` / `SEED_ENFERMEIRO_SENHA` | ver tabela acima | credenciais do enfermeiro semente |
 | `SEED_PACIENTE1_EMAIL` / `SEED_PACIENTE1_SENHA` | ver tabela acima | credenciais do paciente 1 semente |
 | `SEED_PACIENTE2_EMAIL` / `SEED_PACIENTE2_SENHA` | ver tabela acima | credenciais do paciente 2 semente |
+| `RABBITMQ_HOST` | `localhost` | host do broker |
+| `RABBITMQ_PORT` | `5672` | porta AMQP do broker |
+| `RABBITMQ_USERNAME` / `RABBITMQ_PASSWORD` | `guest` / `guest` | credenciais do broker |
+| `RABBITMQ_EXCHANGE` | `agendamento.consultas` | exchange onde os eventos de consulta são publicados |
 
-### Subindo um Postgres local rápido (opcional)
+### Subindo Postgres e RabbitMQ localmente (opcional)
 
 ```bash
 docker run --name hospital-postgres -e POSTGRES_DB=hospital_agendamento \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
   -p 5432:5432 -d postgres:16
+
+docker run --name hospital-rabbitmq -p 5672:5672 -p 15672:15672 \
+  -d rabbitmq:3-management
 ```
+
+Ou suba tudo de uma vez via compose: `docker compose up db rabbitmq`. O
+management UI do RabbitMQ fica em `http://localhost:15673` (usuário/senha
+`guest`/`guest`) quando subido pelo `docker-compose.yml` deste repositório
+(porta `15672` no `docker run` acima, se rodado à parte).
 
 ### Rodando a aplicação
 
@@ -204,14 +293,25 @@ curl -u enfermeiro@hospital.com:enfermeiro123 \
   posse do paciente sobre a própria consulta.
 - `CustomUserDetailsServiceTest`: carregamento de usuário e mapeamento de
   perfil para `GrantedAuthority`.
+- `ConsultaServiceTest`: regras de negócio do agendamento em isolamento
+  (Mockito) — paciente/profissional inválidos, conflito de horário ao
+  registrar e ao editar, e publicação do evento correto em cada caso de
+  sucesso.
+- `ConsultaBusinessRulesIntegrationTest`: os mesmos cenários de negócio
+  ponta a ponta via MockMvc (400/200), com `RabbitTemplate` mockado para não
+  depender de um broker real.
+- `ConsultaEventPublisherTest`: roteamento por tipo de evento e tolerância a
+  falha do broker (loga em vez de relançar).
+
+Rode `./mvnw test` — o `jacoco-maven-plugin` gera o relatório de cobertura em
+`target/site/jacoco/index.html`.
 
 ## O que fica para as próximas partes do time
 
-- **Serviço de Agendamento (Luciano)**: evoluir as validações de negócio
-  (conflito de horário), publicar eventos `consulta.criada` /
-  `consulta.editada` no RabbitMQ/Kafka a partir do `ConsultaService`.
-- **Serviço de Notificações (Caio)**: consumir os eventos acima e disparar
-  lembretes; Docker Compose com Postgres + broker; documentação e
-  collection Postman.
+- **Serviço de Notificações (Caio)**: consumir os eventos `consulta.criada`
+  / `consulta.editada` (contrato documentado em "Eventos publicados
+  (RabbitMQ)" acima) e disparar lembretes; Docker Compose com Postgres +
+  broker próprios; documentação e collection Postman.
 - **Histórico via GraphQL (Igor)**: schema/resolvers de consulta sobre os
-  dados de `Consulta`; QA geral e testes de integração ponta a ponta.
+  dados de `Consulta`; QA geral e testes de integração ponta a ponta
+  (autenticação → agendamento → evento → notificação → histórico).
