@@ -15,10 +15,23 @@ services:
       timeout: 5s
       retries: 10
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   app:
     build: .
     depends_on:
       db:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     environment:
       DB_URL: jdbc:postgresql://db:5432/hospital_agendamento
@@ -26,6 +39,10 @@ services:
       DB_PASSWORD: postgres
       JPA_DDL_AUTO: update
       SERVER_PORT: 8080
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
     ports:
       - "8081:8080"
 
