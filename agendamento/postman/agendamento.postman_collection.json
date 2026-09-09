@@ -1,0 +1,148 @@
+{
+  "info": {
+    "name": "Servico de Agendamento - Tech Challenge Fase 3",
+    "description": "Autenticacao HTTP Basic por perfil (medico, enfermeiro, paciente) e CRUD de consultas. As variaveis de colecao trazem as credenciais semente do DemoUsersSeeder; ajuste base_url/senhas conforme o ambiente.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8080" },
+    { "key": "medico_user", "value": "medico@hospital.com" },
+    { "key": "medico_pass", "value": "medico123" },
+    { "key": "enfermeiro_user", "value": "enfermeiro@hospital.com" },
+    { "key": "enfermeiro_pass", "value": "enfermeiro123" },
+    { "key": "paciente1_user", "value": "paciente1@hospital.com" },
+    { "key": "paciente1_pass", "value": "paciente123" },
+    { "key": "paciente2_user", "value": "paciente2@hospital.com" },
+    { "key": "paciente2_pass", "value": "paciente123" },
+    { "key": "consulta_id", "value": "1" }
+  ],
+  "item": [
+    {
+      "name": "Enfermeiro - registrar consulta (POST /consultas) -> 201",
+      "request": {
+        "method": "POST",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{enfermeiro_user}}" },
+          { "key": "password", "value": "{{enfermeiro_pass}}" }
+        ]},
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{\n  \"pacienteId\": 3,\n  \"profissionalId\": 1,\n  \"dataHora\": \"2999-01-15T14:30:00\",\n  \"observacoes\": \"Consulta de rotina\"\n}" },
+        "url": { "raw": "{{base_url}}/consultas", "host": ["{{base_url}}"], "path": ["consultas"] }
+      }
+    },
+    {
+      "name": "Medico - registrar consulta (POST) -> 403 (nao permitido)",
+      "request": {
+        "method": "POST",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{medico_user}}" },
+          { "key": "password", "value": "{{medico_pass}}" }
+        ]},
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{\n  \"pacienteId\": 3,\n  \"profissionalId\": 1,\n  \"dataHora\": \"2999-01-15T15:30:00\"\n}" },
+        "url": { "raw": "{{base_url}}/consultas", "host": ["{{base_url}}"], "path": ["consultas"] }
+      }
+    },
+    {
+      "name": "Sem credenciais (POST) -> 401",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{\n  \"pacienteId\": 3,\n  \"profissionalId\": 1,\n  \"dataHora\": \"2999-01-15T16:30:00\"\n}" },
+        "url": { "raw": "{{base_url}}/consultas", "host": ["{{base_url}}"], "path": ["consultas"] }
+      }
+    },
+    {
+      "name": "Medico - editar consulta (PUT /consultas/{id}) -> 200",
+      "request": {
+        "method": "PUT",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{medico_user}}" },
+          { "key": "password", "value": "{{medico_pass}}" }
+        ]},
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{\n  \"dataHora\": \"2999-01-15T14:30:00\",\n  \"status\": \"REALIZADA\",\n  \"observacoes\": \"Paciente atendido\"\n}" },
+        "url": { "raw": "{{base_url}}/consultas/{{consulta_id}}", "host": ["{{base_url}}"], "path": ["consultas", "{{consulta_id}}"] }
+      }
+    },
+    {
+      "name": "Enfermeiro - editar consulta (PUT) -> 403 (nao permitido)",
+      "request": {
+        "method": "PUT",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{enfermeiro_user}}" },
+          { "key": "password", "value": "{{enfermeiro_pass}}" }
+        ]},
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{\n  \"dataHora\": \"2999-01-15T14:30:00\",\n  \"status\": \"CANCELADA\"\n}" },
+        "url": { "raw": "{{base_url}}/consultas/{{consulta_id}}", "host": ["{{base_url}}"], "path": ["consultas", "{{consulta_id}}"] }
+      }
+    },
+    {
+      "name": "Medico - historico completo (GET /consultas) -> 200",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{medico_user}}" },
+          { "key": "password", "value": "{{medico_pass}}" }
+        ]},
+        "url": { "raw": "{{base_url}}/consultas", "host": ["{{base_url}}"], "path": ["consultas"] }
+      }
+    },
+    {
+      "name": "Enfermeiro - historico completo (GET /consultas) -> 200",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{enfermeiro_user}}" },
+          { "key": "password", "value": "{{enfermeiro_pass}}" }
+        ]},
+        "url": { "raw": "{{base_url}}/consultas", "host": ["{{base_url}}"], "path": ["consultas"] }
+      }
+    },
+    {
+      "name": "Paciente - historico completo (GET /consultas) -> 403",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{paciente1_user}}" },
+          { "key": "password", "value": "{{paciente1_pass}}" }
+        ]},
+        "url": { "raw": "{{base_url}}/consultas", "host": ["{{base_url}}"], "path": ["consultas"] }
+      }
+    },
+    {
+      "name": "Paciente - minhas consultas (GET /consultas/me) -> 200",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{paciente1_user}}" },
+          { "key": "password", "value": "{{paciente1_pass}}" }
+        ]},
+        "url": { "raw": "{{base_url}}/consultas/me", "host": ["{{base_url}}"], "path": ["consultas", "me"] }
+      }
+    },
+    {
+      "name": "Paciente - consulta especifica propria (GET /consultas/{id}) -> 200",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{paciente1_user}}" },
+          { "key": "password", "value": "{{paciente1_pass}}" }
+        ]},
+        "url": { "raw": "{{base_url}}/consultas/{{consulta_id}}", "host": ["{{base_url}}"], "path": ["consultas", "{{consulta_id}}"] }
+      }
+    },
+    {
+      "name": "Paciente - consulta de outro paciente (GET /consultas/{id}) -> 403",
+      "request": {
+        "method": "GET",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{paciente2_user}}" },
+          { "key": "password", "value": "{{paciente2_pass}}" }
+        ]},
+        "url": { "raw": "{{base_url}}/consultas/{{consulta_id}}", "host": ["{{base_url}}"], "path": ["consultas", "{{consulta_id}}"] }
+      }
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+# Schema GraphQL do Servico de Historico.
+# Endpoint: POST /graphql   |   GraphiQL: GET /graphiql
+# Autenticacao: HTTP Basic (mesmas credenciais do Servico de Agendamento).
+
+type Query {
+    "Todos os atendimentos de um paciente (passados e futuros), ordenados por data/hora. Para o perfil PACIENTE o argumento pacienteId e ignorado: retorna sempre o proprio historico."
+    historicoPaciente(pacienteId: ID): [Atendimento!]!
+
+    "Apenas os atendimentos futuros de um paciente (dataHora > agora), ordenados por data/hora. Mesmas regras de acesso de historicoPaciente."
+    consultasFuturas(pacienteId: ID): [Atendimento!]!
+}
+
+type Atendimento {
+    "Id da consulta na origem (Servico de Agendamento)."
+    consultaId: ID!
+    pacienteId: ID!
+    pacienteNome: String!
+    pacienteEmail: String!
+    profissionalId: ID!
+    profissionalNome: String!
+    "Data/hora da consulta em ISO-8601 local (ex.: 2026-09-01T14:30:00)."
+    dataHora: String!
+    status: StatusAtendimento!
+    observacoes: String
+}
+
+enum StatusAtendimento {
+    AGENDADA
+    REALIZADA
+    CANCELADA
+}

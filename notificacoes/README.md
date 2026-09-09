@@ -17,31 +17,40 @@ registra o lembrete correspondente ao paciente.
 RabbitMQ — exchange agendamento.consultas (topic, durável)
                 │  routing keys: consulta.criada / consulta.editada
                 ▼
-     fila notificacoes.lembretes (binding: consulta.*)
+     fila notificacoes.lembretes (binding: consulta.*)   ──falha──▶ notificacoes.lembretes.dlq
                 │
                 ▼
       NotificacaoListener ──▶ NotificacaoService ──▶ NotificacaoRepository
-                                                              │
-                                                              ▼
-                                                     Postgres (hospital_notificacoes)
+                │                                             │
+                │                                             ▼
+  LembreteProximidadeScheduler (@Scheduled)          Postgres (hospital_notificacoes)
 ```
 
 - **Envio do lembrete**: nesta fase o "envio" é simulado — o serviço grava
   um registro de `Notificacao` (status `ENVIADA`) e loga a mensagem. Não há
   envio de e-mail/SMS real (ver "Decisões e limitações conhecidas" abaixo).
+- **Lembrete event-driven**: ao consumir `consulta.criada` / `consulta.editada`
+  o serviço registra o lembrete correspondente na hora.
+- **Lembrete de proximidade** (`LembreteProximidadeScheduler`): um job
+  agendado varre periodicamente (default: a cada 1h) as consultas que vão
+  ocorrer dentro de uma janela (default: próximas 24h) e dispara um lembrete
+  extra ao paciente — atende ao requisito "lembretes automáticos sobre
+  consultas futuras". Idempotente: cada consulta recebe o lembrete de
+  proximidade uma única vez (flag `lembreteProximidadeEnviado`).
 - **Idempotência**: cada evento carrega um `eventoId` (UUID) único. Se a
   mesma mensagem for reentregue pelo broker, o serviço detecta pelo
   `eventoId` já persistido e ignora, em vez de duplicar o lembrete.
-- **Tolerância a falha de parsing**: se uma mensagem chegar malformada, o
-  listener loga o erro e descarta em vez de relançar — evita um loop
-  infinito de redelivery para uma mensagem que nunca vai processar (mesmo
-  espírito best-effort documentado no Serviço de Agendamento).
+- **Retry + Dead Letter Queue**: falha transitória ao processar (ex.: banco
+  fora) é retentada 3× com backoff exponencial (`spring.rabbitmq.listener.simple.retry.*`);
+  esgotadas as tentativas, ou se a mensagem chegar malformada (falha
+  permanente), ela é rejeitada sem requeue e roteada para
+  `notificacoes.lembretes.dlq` — sem loop infinito de redelivery.
 
 ## Modelo de domínio
 
 | Entidade | Campos | Observações |
 |---|---|---|
-| `Notificacao` | id, eventoId, tipoEvento, consultaId, pacienteId, pacienteNome, pacienteEmail, dataHoraConsulta, mensagem, status, criadoEm | `eventoId` é único (idempotência); `status`: `ENVIADA`, `FALHA` |
+| `Notificacao` | id, eventoId, tipoEvento, consultaId, pacienteId, pacienteNome, pacienteEmail, dataHoraConsulta, mensagem, status, criadoEm, lembreteProximidadeEnviado | `eventoId` é único (idempotência); `status`: `ENVIADA`, `FALHA`; `lembreteProximidadeEnviado` controla o job de proximidade |
 
 ## Endpoints da API
 
@@ -80,6 +89,10 @@ outro serviço (decisão de escopo, ver seção abaixo).
 | `RABBITMQ_EXCHANGE` | `agendamento.consultas` | precisa bater com o exchange do Agendamento |
 | `RABBITMQ_QUEUE` | `notificacoes.lembretes` | fila deste serviço |
 | `RABBITMQ_ROUTING_KEY_PATTERN` | `consulta.*` | binding — cobre criação e edição |
+| `RABBITMQ_DLX` / `RABBITMQ_DLQ` | `notificacoes.lembretes.dlx` / `notificacoes.lembretes.dlq` | dead-letter (mensagem descartada após retries) |
+| `LEMBRETE_PROXIMIDADE_ENABLED` | `true` | liga/desliga o job de lembrete de proximidade |
+| `LEMBRETE_PROXIMIDADE_INTERVALO_MS` | `3600000` | período do job (ms) |
+| `LEMBRETE_PROXIMIDADE_JANELA_HORAS` | `24` | antecedência do lembrete de proximidade |
 
 ### Rodando isoladamente (Postgres + RabbitMQ próprios)
 
@@ -92,17 +105,15 @@ Sobe Postgres na porta `5434`, RabbitMQ (AMQP `5675`, management UI
 serviço sozinho, mas nesse modo ele não recebe eventos reais do
 Agendamento (brokers diferentes).
 
-### Rodando o fluxo ponta a ponta com o Serviço de Agendamento
+### Rodando o fluxo ponta a ponta
 
-Suba o broker do Agendamento (`docker compose up rabbitmq` na raiz do
-repositório) e aponte este serviço para ele:
+Use o `docker-compose.yml` da **raiz** do repositório — ele sobe os 3
+serviços com um broker RabbitMQ e um Postgres compartilhados:
 
 ```bash
-RABBITMQ_HOST=localhost RABBITMQ_PORT=5673 ./mvnw spring-boot:run
+docker compose up --build            # na raiz do repositório
+./scripts/e2e.sh                     # valida o fluxo completo
 ```
-
-(porta `5673` é o mapeamento host do `docker-compose.yml` da raiz — ver
-README do Agendamento).
 
 ### Rodando os testes
 
@@ -110,10 +121,10 @@ README do Agendamento).
 ./mvnw test
 ```
 
-Usa H2 em memória; não depende de Postgres/RabbitMQ reais. O listener é
-testado chamando o método diretamente com uma `Message` construída em
-memória (sem broker real), no mesmo espírito dos testes de publicação do
-Agendamento.
+Usa H2 em memória; não depende de Postgres/RabbitMQ reais. O listener e o
+agendador de proximidade são testados chamando os métodos diretamente (sem
+broker real), no mesmo espírito dos testes de publicação do Agendamento.
+Cobertura (JaCoCo): `target/site/jacoco/index.html`.
 
 ## Collection para teste
 
@@ -128,8 +139,9 @@ Agendamento.
   mensagem já é montado como seria enviado a um paciente; plugar um envio
   real (`JavaMailSender` + Mailhog no compose) é uma extensão direta se
   necessário para a demonstração em vídeo.
-- **Sem fila de erro/retry (DLQ)**: mensagem malformada é logada e
-  descartada, não redirecionada para uma dead-letter queue. Suficiente
-  para o escopo desta fase; uma DLQ seria o próximo passo natural.
+- **DLQ sem consumidor**: as mensagens que caem em
+  `notificacoes.lembretes.dlq` ficam lá para inspeção manual (via RabbitMQ
+  Management UI) — não há um consumer de reprocessamento automático da DLQ,
+  o que seria o próximo passo natural.
 - **Sem autenticação**: este serviço não modela usuários — os únicos
   dados de identidade que ele vê vêm dentro do próprio evento consumido.
