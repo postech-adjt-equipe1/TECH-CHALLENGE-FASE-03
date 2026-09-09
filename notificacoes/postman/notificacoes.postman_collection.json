@@ -1,0 +1,33 @@
+{
+  "info": {
+    "name": "Servico de Notificacoes - Tech Challenge Fase 3",
+    "description": "Endpoints de leitura dos lembretes processados a partir dos eventos consulta.criada / consulta.editada publicados pelo Servico de Agendamento.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8082" }
+  ],
+  "item": [
+    {
+      "name": "Listar todas as notificacoes",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/notificacoes", "host": ["{{base_url}}"], "path": ["notificacoes"] }
+      }
+    },
+    {
+      "name": "Buscar notificacao por id",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/notificacoes/1", "host": ["{{base_url}}"], "path": ["notificacoes", "1"] }
+      }
+    },
+    {
+      "name": "Listar notificacoes de um paciente",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "{{base_url}}/notificacoes/paciente/3", "host": ["{{base_url}}"], "path": ["notificacoes", "paciente", "3"] }
+      }
+    }
+  ]
+}
