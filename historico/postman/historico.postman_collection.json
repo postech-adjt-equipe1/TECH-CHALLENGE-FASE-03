@@ -1,0 +1,79 @@
+{
+  "info": {
+    "name": "Servico de Historico (GraphQL) - Tech Challenge Fase 3",
+    "description": "Consultas GraphQL sobre o historico medico. Endpoint unico: POST {{base_url}}/graphql com HTTP Basic. Medico/enfermeiro consultam qualquer paciente; paciente so o proprio historico.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8083" },
+    { "key": "medico_user", "value": "medico@hospital.com" },
+    { "key": "medico_pass", "value": "medico123" },
+    { "key": "enfermeiro_user", "value": "enfermeiro@hospital.com" },
+    { "key": "enfermeiro_pass", "value": "enfermeiro123" },
+    { "key": "paciente1_user", "value": "paciente1@hospital.com" },
+    { "key": "paciente1_pass", "value": "paciente123" }
+  ],
+  "item": [
+    {
+      "name": "Medico - historico completo de um paciente",
+      "request": {
+        "method": "POST",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{medico_user}}" },
+          { "key": "password", "value": "{{medico_pass}}" }
+        ]},
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{\n  \"query\": \"query Historico($id: ID) { historicoPaciente(pacienteId: $id) { consultaId dataHora status profissionalNome observacoes } }\",\n  \"variables\": { \"id\": 3 }\n}" },
+        "url": { "raw": "{{base_url}}/graphql", "host": ["{{base_url}}"], "path": ["graphql"] }
+      }
+    },
+    {
+      "name": "Enfermeiro - apenas consultas futuras de um paciente",
+      "request": {
+        "method": "POST",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{enfermeiro_user}}" },
+          { "key": "password", "value": "{{enfermeiro_pass}}" }
+        ]},
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{\n  \"query\": \"query Futuras($id: ID) { consultasFuturas(pacienteId: $id) { consultaId dataHora status } }\",\n  \"variables\": { \"id\": 3 }\n}" },
+        "url": { "raw": "{{base_url}}/graphql", "host": ["{{base_url}}"], "path": ["graphql"] }
+      }
+    },
+    {
+      "name": "Paciente - proprio historico (pacienteId ignorado)",
+      "request": {
+        "method": "POST",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{paciente1_user}}" },
+          { "key": "password", "value": "{{paciente1_pass}}" }
+        ]},
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{\n  \"query\": \"{ historicoPaciente { consultaId dataHora status } }\"\n}" },
+        "url": { "raw": "{{base_url}}/graphql", "host": ["{{base_url}}"], "path": ["graphql"] }
+      }
+    },
+    {
+      "name": "Paciente - historico de outro paciente -> erro FORBIDDEN",
+      "request": {
+        "method": "POST",
+        "auth": { "type": "basic", "basic": [
+          { "key": "username", "value": "{{paciente1_user}}" },
+          { "key": "password", "value": "{{paciente1_pass}}" }
+        ]},
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{\n  \"query\": \"{ historicoPaciente(pacienteId: 4) { consultaId } }\"\n}" },
+        "url": { "raw": "{{base_url}}/graphql", "host": ["{{base_url}}"], "path": ["graphql"] }
+      }
+    },
+    {
+      "name": "Sem credenciais -> 401",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Content-Type", "value": "application/json" } ],
+        "body": { "mode": "raw", "raw": "{\n  \"query\": \"{ historicoPaciente(pacienteId: 3) { consultaId } }\"\n}" },
+        "url": { "raw": "{{base_url}}/graphql", "host": ["{{base_url}}"], "path": ["graphql"] }
+      }
+    }
+  ]
+}

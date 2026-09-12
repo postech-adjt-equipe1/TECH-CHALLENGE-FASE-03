@@ -13,6 +13,7 @@ import jakarta.persistence.UniqueConstraint;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.ColumnDefault;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -60,6 +61,11 @@ public class Notificacao {
     @Column(nullable = false)
     private Instant criadoEm;
 
+    /** Marca se o lembrete de proximidade (job agendado) ja foi disparado para esta consulta. */
+    @Column(nullable = false)
+    @ColumnDefault("false")
+    private boolean lembreteProximidadeEnviado;
+
     public Notificacao(UUID eventoId, TipoEvento tipoEvento, Long consultaId, Long pacienteId,
                         String pacienteNome, String pacienteEmail, LocalDateTime dataHoraConsulta,
                         String mensagem, StatusNotificacao status) {
@@ -73,5 +79,10 @@ public class Notificacao {
         this.mensagem = mensagem;
         this.status = status;
         this.criadoEm = Instant.now();
+        this.lembreteProximidadeEnviado = false;
+    }
+
+    public void marcarLembreteProximidadeEnviado() {
+        this.lembreteProximidadeEnviado = true;
     }
 }

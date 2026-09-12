@@ -306,12 +306,18 @@ curl -u enfermeiro@hospital.com:enfermeiro123 \
 Rode `./mvnw test` — o `jacoco-maven-plugin` gera o relatório de cobertura em
 `target/site/jacoco/index.html`.
 
-## O que fica para as próximas partes do time
+## Serviços que consomem estes eventos
 
-- **Serviço de Notificações (Caio)**: consumir os eventos `consulta.criada`
-  / `consulta.editada` (contrato documentado em "Eventos publicados
-  (RabbitMQ)" acima) e disparar lembretes; Docker Compose com Postgres +
-  broker próprios; documentação e collection Postman.
-- **Histórico via GraphQL (Igor)**: schema/resolvers de consulta sobre os
-  dados de `Consulta`; QA geral e testes de integração ponta a ponta
-  (autenticação → agendamento → evento → notificação → histórico).
+- **Serviço de Notificações** ([`../notificacoes/`](../notificacoes/README.md)):
+  consome `consulta.criada` / `consulta.editada` (contrato em "Eventos
+  publicados (RabbitMQ)" acima) e registra lembretes ao paciente, incluindo
+  um lembrete de proximidade agendado; retry + DLQ no consumo.
+- **Serviço de Histórico (GraphQL)** ([`../historico/`](../historico/README.md)):
+  projeta os mesmos eventos num read model e expõe `historicoPaciente` /
+  `consultasFuturas` via GraphQL, com as mesmas regras de acesso por perfil.
+
+## Collection para teste
+
+`postman/agendamento.postman_collection.json` — importe no Postman (variável
+`base_url`, default `http://localhost:8080`). Cobre a matriz perfil ×
+endpoint, incluindo os casos `401` / `403` e a checagem de posse do paciente.

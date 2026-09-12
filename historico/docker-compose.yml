@@ -1,0 +1,53 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: hospital_historico
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5436:5432"
+    volumes:
+      - historico_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Broker proprio, para desenvolver/testar este servico isoladamente.
+  # Para o fluxo ponta a ponta com o Servico de Agendamento use o
+  # docker-compose.yml da RAIZ do repositorio (broker compartilhado).
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5676:5672"
+      - "15676:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/hospital_historico
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      JPA_DDL_AUTO: update
+      SERVER_PORT: 8083
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: guest
+      RABBITMQ_PASSWORD: guest
+    ports:
+      - "8083:8083"
+
+volumes:
+  historico_pgdata:

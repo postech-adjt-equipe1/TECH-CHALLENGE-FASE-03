@@ -1,6 +1,6 @@
-package br.com.fiap.notificacoes.messaging;
+package br.com.fiap.historico.messaging;
 
-import br.com.fiap.notificacoes.service.NotificacaoService;
+import br.com.fiap.historico.service.HistoricoService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.AmqpRejectAndDontRequeueException;
@@ -12,32 +12,30 @@ import tools.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Consome a mensagem como bytes crus (em vez de deixar o
- * MessageConverter resolver o tipo pelo header {@code __TypeId__}) porque o
- * publisher grava ali o nome da classe do Servico de Agendamento
- * (br.com.fiap.agendamento...), que nao existe neste servico. Assim o
- * parsing fica isolado do detalhe de serializacao do lado publicador.
+ * Consome a mensagem como bytes crus (em vez de deixar o MessageConverter
+ * resolver o tipo pelo header {@code __TypeId__}) porque o publisher grava ali
+ * o nome da classe do Servico de Agendamento, que nao existe neste servico.
  *
  * <p>Tratamento de falha:
  * <ul>
  *   <li>parsing malformado = erro <b>permanente</b>: rejeita sem requeue
- *       ({@link AmqpRejectAndDontRequeueException}); a mensagem vai direto
- *       para a DLQ ({@code notificacoes.lembretes.dlq}).</li>
- *   <li>falha ao processar (ex.: banco indisponivel) = erro <b>transitorio</b>:
- *       relanca; o interceptor de retry do Spring AMQP tenta novamente
- *       (ver {@code application.properties}) e, esgotadas as tentativas, a
- *       mensagem tambem cai na DLQ.</li>
+ *       ({@link AmqpRejectAndDontRequeueException}) e a mensagem vai direto
+ *       para a DLQ — reprocessar nao adianta.</li>
+ *   <li>qualquer outra falha (ex.: banco indisponivel) = erro <b>transitorio</b>:
+ *       relanca; o interceptor de retry do Spring AMQP tenta de novo algumas
+ *       vezes (ver {@code application.properties}) e, esgotadas as tentativas,
+ *       a mensagem tambem cai na DLQ.</li>
  * </ul>
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
-public class NotificacaoListener {
+public class ConsultaEventoListener {
 
-    private final NotificacaoService notificacaoService;
+    private final HistoricoService historicoService;
     private final ObjectMapper objectMapper;
 
-    @RabbitListener(queues = "${notificacoes.messaging.queue}")
+    @RabbitListener(queues = "${historico.messaging.queue}")
     public void aoReceberEventoConsulta(Message message) {
         String json = new String(message.getBody(), StandardCharsets.UTF_8);
         ConsultaEventoPayload payload;
@@ -47,6 +45,6 @@ public class NotificacaoListener {
             log.error("Evento de consulta malformado, enviando para a DLQ: {}", json, ex);
             throw new AmqpRejectAndDontRequeueException("Payload de evento invalido", ex);
         }
-        notificacaoService.processar(payload);
+        historicoService.projetar(payload);
     }
 }

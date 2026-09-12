@@ -7,6 +7,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.amqp.AmqpRejectAndDontRequeueException;
 import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageProperties;
 
@@ -16,6 +17,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -54,10 +56,11 @@ class NotificacaoListenerTest {
     }
 
     @Test
-    void naoRelancaExcecaoQuandoCorpoDaMensagemEstaMalFormado() {
+    void mensagemMalFormadaVaiParaDlqSemRequeue() {
         listener = new NotificacaoListener(notificacaoService, objectMapper);
 
-        listener.aoReceberEventoConsulta(mensagemJson("{ isso nao e json valido"));
+        assertThatThrownBy(() -> listener.aoReceberEventoConsulta(mensagemJson("{ isso nao e json valido")))
+                .isInstanceOf(AmqpRejectAndDontRequeueException.class);
 
         verify(notificacaoService, never()).processar(org.mockito.ArgumentMatchers.any());
     }

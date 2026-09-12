@@ -1,0 +1,138 @@
+# Ambiente integrado completo: 1 Postgres (3 bancos) + 1 RabbitMQ + os 3 servicos.
+# Sobe tudo com:  docker compose up --build
+#
+# Portas publicadas no host:
+#   Agendamento  -> http://localhost:8080
+#   Notificacoes -> http://localhost:8082
+#   Historico    -> http://localhost:8083   (GraphQL em /graphql, GraphiQL em /graphiql)
+#   RabbitMQ UI  -> http://localhost:15672  (guest/guest)
+#   Postgres     -> localhost:5432
+#
+# Cada servico tambem tem um docker-compose.yml proprio (infra isolada para
+# desenvolver aquele modulo sozinho); este arquivo e o unico que sobe o fluxo
+# ponta a ponta com um broker compartilhado.
+
+x-seed-credentials: &seed-credentials
+  SEED_MEDICO_EMAIL: ${SEED_MEDICO_EMAIL:-medico@hospital.com}
+  SEED_MEDICO_SENHA: ${SEED_MEDICO_SENHA:-medico123}
+  SEED_ENFERMEIRO_EMAIL: ${SEED_ENFERMEIRO_EMAIL:-enfermeiro@hospital.com}
+  SEED_ENFERMEIRO_SENHA: ${SEED_ENFERMEIRO_SENHA:-enfermeiro123}
+  SEED_PACIENTE1_EMAIL: ${SEED_PACIENTE1_EMAIL:-paciente1@hospital.com}
+  SEED_PACIENTE1_SENHA: ${SEED_PACIENTE1_SENHA:-paciente123}
+  SEED_PACIENTE2_EMAIL: ${SEED_PACIENTE2_EMAIL:-paciente2@hospital.com}
+  SEED_PACIENTE2_SENHA: ${SEED_PACIENTE2_SENHA:-paciente123}
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: hospital_agendamento
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - hospital_pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  agendamento:
+    build: ./agendamento
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      <<: *seed-credentials
+      DB_URL: jdbc:postgresql://db:5432/hospital_agendamento
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      JPA_DDL_AUTO: update
+      SERVER_PORT: 8080
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  notificacoes:
+    build: ./notificacoes
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/hospital_notificacoes
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      JPA_DDL_AUTO: update
+      SERVER_PORT: 8082
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8082"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  historico:
+    build: ./historico
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      <<: *seed-credentials
+      DB_URL: jdbc:postgresql://db:5432/hospital_historico
+      DB_USERNAME: ${DB_USERNAME:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      JPA_DDL_AUTO: update
+      SERVER_PORT: 8083
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME:-guest}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8083"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  hospital_pgdata:
